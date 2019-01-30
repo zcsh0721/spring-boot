@@ -263,11 +263,18 @@ public class SpringApplication {
 	public SpringApplication(ResourceLoader resourceLoader, Class<?>... primarySources) {
 		this.resourceLoader = resourceLoader;
 		Assert.notNull(primarySources, "PrimarySources must not be null");
+		// 保存创建 SpringApplication 时传入的 class,一般使我们执行 main 方法的 Class
 		this.primarySources = new LinkedHashSet<>(Arrays.asList(primarySources));
+		// 判断此项目的类型,是否是 web 项目等.
 		this.webApplicationType = WebApplicationType.deduceFromClasspath();
+		// 初始化 META-INF/spring.factories 下的配置
+		// 并实例化所有 spring.factories 中配置的 key 为 org.springframework.context.ApplicationContextInitializer 的类
 		setInitializers((Collection) getSpringFactoriesInstances(
 				ApplicationContextInitializer.class));
+		// 实例化所有 spring.factories 中配置的 key 为 org.springframework.context.ApplicationListener 的类
 		setListeners((Collection) getSpringFactoriesInstances(ApplicationListener.class));
+
+		// 保存调用 main 方法的 Class 类
 		this.mainApplicationClass = deduceMainApplicationClass();
 	}
 
@@ -293,26 +300,42 @@ public class SpringApplication {
 	 * @return a running {@link ApplicationContext}
 	 */
 	public ConfigurableApplicationContext run(String... args) {
+		// 创建一个秒表,计算启动时间
 		StopWatch stopWatch = new StopWatch();
 		stopWatch.start();
 		ConfigurableApplicationContext context = null;
 		Collection<SpringBootExceptionReporter> exceptionReporters = new ArrayList<>();
+		// 初始化 java.awt.headless 配置
 		configureHeadlessProperty();
+		// 实例化所有 spring.factories 中配置的 key 为 org.springframework.boot.SpringApplicationRunListener 的类
 		SpringApplicationRunListeners listeners = getRunListeners(args);
+		// 启动监听器
 		listeners.starting();
 		try {
+			// 保存 args 参数
 			ApplicationArguments applicationArguments = new DefaultApplicationArguments(
 					args);
+			// 准备环境变量,如将指定 activeProfiles 环境的配置文件加载到环境中
+			// 调用所有 listeners 的 environmentPrepared 方法
 			ConfigurableEnvironment environment = prepareEnvironment(listeners,
 					applicationArguments);
+
 			configureIgnoreBeanInfo(environment);
 			Banner printedBanner = printBanner(environment);
+			// 创建 ApplicationContext , 无 web 创建的是 org.springframework.context.annotation.AnnotationConfigApplicationContext
 			context = createApplicationContext();
+			// 实例化所有 spring.factories 中配置的 key 为 org.springframework.SpringBootExceptionReporter 的类
 			exceptionReporters = getSpringFactoriesInstances(
 					SpringBootExceptionReporter.class,
 					new Class[] { ConfigurableApplicationContext.class }, context);
+			// 准备上下文环境 * 重点方法
+			// 初始化一系列 BeanDefinitionReader
+			// 调用所有 listeners 的 contextPrepared 方法
+			// 调用所有 ApplicationContextInitializer 实例的 initialize 方法
+			// 调用所有 SpringApplicationRunListener 实例的 contextLoaded 方法
 			prepareContext(context, environment, listeners, applicationArguments,
 					printedBanner);
+			// 刷新上下文
 			refreshContext(context);
 			afterRefresh(context, applicationArguments);
 			stopWatch.stop();
@@ -342,9 +365,13 @@ public class SpringApplication {
 			SpringApplicationRunListeners listeners,
 			ApplicationArguments applicationArguments) {
 		// Create and configure the environment
+		// 创建和配置环境
 		ConfigurableEnvironment environment = getOrCreateEnvironment();
 		configureEnvironment(environment, applicationArguments.getSourceArgs());
+		// 调用所有监听器的 environmentPrepared 方法
+		// ConfigFileApplicationListener 会将将设置的 activeProfiles 配置文件加载到 environment
 		listeners.environmentPrepared(environment);
+		// 将环境变量绑定到 springApplication 中
 		bindToSpringApplication(environment);
 		if (!this.isCustomEnvironment) {
 			environment = new EnvironmentConverter(getClassLoader())
@@ -370,8 +397,11 @@ public class SpringApplication {
 			ApplicationArguments applicationArguments, Banner printedBanner) {
 		context.setEnvironment(environment);
 		postProcessApplicationContext(context);
+		// 调用所有 ApplicationContextInitializer 实例的 initialize 方法
 		applyInitializers(context);
+		// 调用所有 SpringApplicationRunListener 实例的 contextPrepared 方法
 		listeners.contextPrepared(context);
+		// 打印启动日记
 		if (this.logStartupInfo) {
 			logStartupInfo(context.getParent() == null);
 			logStartupProfileInfo(context);
@@ -389,7 +419,18 @@ public class SpringApplication {
 		// Load the sources
 		Set<Object> sources = getAllSources();
 		Assert.notEmpty(sources, "Sources must not be empty");
+		/*
+		 * 创建 BeanDefinitionLoader
+		 * 		1. AnnotatedBeanDefinitionReader (带注解的 bean)
+		 * 		2. XmlBeanDefinitionReader (xml 定义的 bean)
+		 * 		3. ClassPathBeanDefinitionScanner (扫描指定包下的带注解的 bean (@Component @Repository @Service @Controller))
+		 * 还会创建 ConditionEvaluator 计算 @Conditional 条件的类
+		 * 创建注解类型过滤器 AnnotationTypeFilter 过滤带 @Component 的注解( @Repository @Service @Controller 都携带的 @Component)
+		 * 排除 sources 类,也就是我们启动的 main 方法的类,该类不会注入到 ioc 容器中(但是会将 sources 的 BeanDefinition 当入容器中)
+		 */
+
 		load(context, sources.toArray(new Object[0]));
+		// 调用所有 SpringApplicationRunListener 实例的 contextLoaded 方法
 		listeners.contextLoaded(context);
 	}
 
