@@ -1,11 +1,11 @@
 /*
- * Copyright 2012-2018 the original author or authors.
+ * Copyright 2012-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -33,15 +33,17 @@ import org.springframework.util.ReflectionUtils;
 import org.springframework.util.ReflectionUtils.FieldCallback;
 
 /**
- * {@link TestExecutionListener} to trigger {@link MockitoAnnotations#initMocks(Object)}
- * when {@link MockBean @MockBean} annotations are used. Primarily to allow {@link Captor}
- * annotations.
+ * {@link TestExecutionListener} to trigger {@link MockitoAnnotations#openMocks(Object)}
+ * when {@link MockBean @MockBean} annotations are used. Primarily to allow
+ * {@link Captor @Captor} annotations.
  *
  * @author Phillip Webb
  * @author Andy Wilkinson
  * @since 1.4.2
  */
 public class MockitoTestExecutionListener extends AbstractTestExecutionListener {
+
+	private static final String MOCKS_ATTRIBUTE_NAME = MockitoTestExecutionListener.class.getName() + ".mocks";
 
 	@Override
 	public final int getOrder() {
@@ -56,16 +58,24 @@ public class MockitoTestExecutionListener extends AbstractTestExecutionListener 
 
 	@Override
 	public void beforeTestMethod(TestContext testContext) throws Exception {
-		if (Boolean.TRUE.equals(testContext.getAttribute(
-				DependencyInjectionTestExecutionListener.REINJECT_DEPENDENCIES_ATTRIBUTE))) {
+		if (Boolean.TRUE.equals(
+				testContext.getAttribute(DependencyInjectionTestExecutionListener.REINJECT_DEPENDENCIES_ATTRIBUTE))) {
 			initMocks(testContext);
 			reinjectFields(testContext);
 		}
 	}
 
+	@Override
+	public void afterTestMethod(TestContext testContext) throws Exception {
+		Object mocks = testContext.getAttribute(MOCKS_ATTRIBUTE_NAME);
+		if (mocks instanceof AutoCloseable) {
+			((AutoCloseable) mocks).close();
+		}
+	}
+
 	private void initMocks(TestContext testContext) {
 		if (hasMockitoAnnotations(testContext)) {
-			MockitoAnnotations.initMocks(testContext.getTestInstance());
+			testContext.setAttribute(MOCKS_ATTRIBUTE_NAME, MockitoAnnotations.openMocks(testContext.getTestInstance()));
 		}
 	}
 
@@ -76,23 +86,19 @@ public class MockitoTestExecutionListener extends AbstractTestExecutionListener 
 	}
 
 	private void injectFields(TestContext testContext) {
-		postProcessFields(testContext,
-				(mockitoField, postProcessor) -> postProcessor.inject(mockitoField.field,
-						mockitoField.target, mockitoField.definition));
+		postProcessFields(testContext, (mockitoField, postProcessor) -> postProcessor.inject(mockitoField.field,
+				mockitoField.target, mockitoField.definition));
 	}
 
 	private void reinjectFields(final TestContext testContext) {
 		postProcessFields(testContext, (mockitoField, postProcessor) -> {
 			ReflectionUtils.makeAccessible(mockitoField.field);
-			ReflectionUtils.setField(mockitoField.field, testContext.getTestInstance(),
-					null);
-			postProcessor.inject(mockitoField.field, mockitoField.target,
-					mockitoField.definition);
+			ReflectionUtils.setField(mockitoField.field, testContext.getTestInstance(), null);
+			postProcessor.inject(mockitoField.field, mockitoField.target, mockitoField.definition);
 		});
 	}
 
-	private void postProcessFields(TestContext testContext,
-			BiConsumer<MockitoField, MockitoPostProcessor> consumer) {
+	private void postProcessFields(TestContext testContext, BiConsumer<MockitoField, MockitoPostProcessor> consumer) {
 		DefinitionsParser parser = new DefinitionsParser();
 		parser.parse(testContext.getTestClass());
 		if (!parser.getDefinitions().isEmpty()) {
@@ -101,8 +107,7 @@ public class MockitoTestExecutionListener extends AbstractTestExecutionListener 
 			for (Definition definition : parser.getDefinitions()) {
 				Field field = parser.getField(definition);
 				if (field != null) {
-					consumer.accept(new MockitoField(field, testContext.getTestInstance(),
-							definition), postProcessor);
+					consumer.accept(new MockitoField(field, testContext.getTestInstance(), definition), postProcessor);
 				}
 			}
 		}
@@ -116,8 +121,7 @@ public class MockitoTestExecutionListener extends AbstractTestExecutionListener 
 		private final Set<Annotation> annotations = new LinkedHashSet<>();
 
 		@Override
-		public void doWith(Field field)
-				throws IllegalArgumentException, IllegalAccessException {
+		public void doWith(Field field) throws IllegalArgumentException, IllegalAccessException {
 			for (Annotation annotation : field.getDeclaredAnnotations()) {
 				if (annotation.annotationType().getName().startsWith("org.mockito")) {
 					this.annotations.add(annotation);
@@ -125,7 +129,7 @@ public class MockitoTestExecutionListener extends AbstractTestExecutionListener 
 			}
 		}
 
-		public boolean hasAnnotations() {
+		boolean hasAnnotations() {
 			return !this.annotations.isEmpty();
 		}
 
